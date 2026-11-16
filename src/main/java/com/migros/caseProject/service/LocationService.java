@@ -3,79 +3,112 @@ package com.migros.caseProject.service;
 import com.migros.caseProject.model.CourierLocation;
 import com.migros.caseProject.model.Store;
 import com.migros.caseProject.model.data.LocationDTO;
-import com.migros.caseProject.util.GeoUtils;
+import com.migros.caseProject.model.data.LocationTrackingResponse;
+import com.migros.caseProject.model.data.StoreEntrance;
+import com.migros.caseProject.util.DistanceCalculator;
 import com.migros.caseProject.util.StoreLoader;
-import org.springframework.stereotype.Service;
 import com.migros.caseProject.factory.CourierLocationFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class LocationService {
 
-    private final StoreLoader storeLoader;
-    private final Map<String, Long> lastEntryTimestamps = new HashMap<>();
-    private final Map<String, Double> totalDistances = new HashMap<>();
-    private final Map<String, CourierLocation> lastLocations = new HashMap<>();
+    private static final Logger log = LoggerFactory.getLogger(LocationService.class);
 
-    // Constructor Injection
-    public LocationService(StoreLoader storeLoader) {
+    private final StoreLoader storeLoader;
+    private final DistanceCalculator distanceCalculator;
+    private final double storeRadiusMeters;
+    private final long reentryCooldownMillis;
+    private final Map<String, CourierTrackingState> trackingByCourier = new ConcurrentHashMap<>();
+
+    public LocationService(
+            StoreLoader storeLoader,
+            DistanceCalculator distanceCalculator,
+            @Value("${migros.radius-meters:${migros.radius:100}}") double storeRadiusMeters,
+            @Value("${migros.reentry-cooldown-millis:60000}") long reentryCooldownMillis) {
         this.storeLoader = storeLoader;
+        this.distanceCalculator = distanceCalculator;
+        this.storeRadiusMeters = storeRadiusMeters;
+        this.reentryCooldownMillis = reentryCooldownMillis;
     }
 
-    // Kuryenin belirli bir mağazaya girişini kontrol etme ve reentry kontrolü
-    public void checkCourierStoreEntrance(CourierLocation courierLocation) {
-        List<Store> stores = storeLoader.loadStores(); // Mağazaları yükle
-        boolean enteredStore = false; // Giriş yapılan mağaza kontrolü
+    public LocationTrackingResponse processLocation(LocationDTO locationDTO) {
+        CourierLocation courierLocation = CourierLocationFactory.fromDTO(locationDTO);
+        CourierTrackingState state = trackingByCourier.computeIfAbsent(
+                courierLocation.getCourierId(), ignored -> new CourierTrackingState());
 
-        for (Store store : stores) {
-            Double distance = GeoUtils.calculateDistance(courierLocation.getLat(), courierLocation.getLng(),
-                    store.getLat(), store.getLng());
+        synchronized (state) {
+            if (state.lastLocation != null
+                    && courierLocation.getTimestamp() < state.lastLocation.getTimestamp()) {
+                log.warn("Rejected out-of-order location for courier {}", courierLocation.getCourierId());
+                throw new InvalidLocationTimestampException(courierLocation.getCourierId());
+            }
 
-            if (distance < 100 && !enteredStore) {  // 100 metre mesafede ve daha önce giriş yapılmamış
-                Long lastEntryTime = lastEntryTimestamps.get(courierLocation.getCourierId() + store.getName());
+            double segmentDistanceMeters = state.lastLocation == null ? 0
+                    : distanceCalculator.calculateDistanceMeters(
+                            state.lastLocation.getLat(), state.lastLocation.getLng(),
+                            courierLocation.getLat(), courierLocation.getLng());
+            state.totalDistanceMeters += segmentDistanceMeters;
+            state.lastLocation = courierLocation;
 
-                // Eğer 1 dakikadan daha kısa süre geçtiyse, yeniden giriş sayılmaz
-                if (lastEntryTime != null && (courierLocation.getTimestamp() - lastEntryTime) < 60000) {
-                    System.out.println("Kurye " + courierLocation.getCourierId() + " aynı mağazaya yeniden girmedi: " + store.getName());
+            List<StoreEntrance> entrances = detectStoreEntrances(courierLocation, state);
+            return new LocationTrackingResponse(
+                    courierLocation.getCourierId(),
+                    segmentDistanceMeters,
+                    state.totalDistanceMeters,
+                    List.copyOf(entrances));
+        }
+    }
+
+    public double getTotalTravelDistance(String courierId) {
+        CourierTrackingState state = trackingByCourier.get(courierId);
+        if (state == null) {
+            return 0;
+        }
+        synchronized (state) {
+            return state.totalDistanceMeters;
+        }
+    }
+
+    private List<StoreEntrance> detectStoreEntrances(CourierLocation location, CourierTrackingState state) {
+        List<StoreEntrance> entrances = new ArrayList<>();
+        for (Store store : storeLoader.getStores()) {
+            double distanceMeters = distanceCalculator.calculateDistanceMeters(
+                    location.getLat(), location.getLng(), store.getLat(), store.getLng());
+            boolean isInside = distanceMeters <= storeRadiusMeters;
+            boolean wasInside = state.insideStores.getOrDefault(store.getName(), false);
+
+            if (isInside && !wasInside) {
+                Long lastCountedEntry = state.lastCountedEntryTimestamps.get(store.getName());
+                if (lastCountedEntry == null
+                        || location.getTimestamp() - lastCountedEntry >= reentryCooldownMillis) {
+                    entrances.add(new StoreEntrance(store.getName(), distanceMeters, location.getTimestamp()));
+                    state.lastCountedEntryTimestamps.put(store.getName(), location.getTimestamp());
+                    log.info("Courier {} entered store '{}' at {} m",
+                            location.getCourierId(), store.getName(), Math.round(distanceMeters * 100.0) / 100.0);
                 } else {
-                    lastEntryTimestamps.put(courierLocation.getCourierId() + store.getName(), courierLocation.getTimestamp());
-                    System.out.println("Kurye " + courierLocation.getCourierId() + " mağazaya girdi: " + store.getName());
-                    enteredStore = true; // İlk mağaza girişi yapıldığında işaretle
+                    log.info("Courier {} re-entered store '{}' within the cooldown; entrance ignored",
+                            location.getCourierId(), store.getName());
                 }
             }
+            state.insideStores.put(store.getName(), isInside);
         }
+        return entrances;
     }
 
-    // Kuryenin hareketini takip etme ve mesafe hesaplama
-    public void trackCourierMovement(CourierLocation courierLocation) {
-        Double totalDistance = totalDistances.getOrDefault(courierLocation.getCourierId(), 0.0);
-        CourierLocation previousLocation = lastLocations.get(courierLocation.getCourierId()); // En son konumu al
-
-        if (previousLocation != null) {
-            Double distance = GeoUtils.calculateDistance(previousLocation.getLat(), previousLocation.getLng(),
-                    courierLocation.getLat(), courierLocation.getLng());
-            totalDistance += distance;
-        }
-
-        totalDistances.put(courierLocation.getCourierId(), totalDistance); // Toplam mesafeyi güncelle
-        lastLocations.put(courierLocation.getCourierId(), courierLocation); // Son konumu güncelle
-    }
-
-    // Toplam mesafe hesaplama
-    public Double getTotalTravelDistance(String courierId) {
-        return totalDistances.getOrDefault(courierId, 0.0);
-    }
-
-    // DTO'dan alınan veriyi kullanarak işlemleri tetikler
-    public void processLocation(LocationDTO locationDTO) {
-        // Factory kullanarak CourierLocation nesnesini oluşturuyoruz
-        CourierLocation courierLocation = CourierLocationFactory.fromDTO(locationDTO);
-
-        // Hem hareketi takip et hem de mağaza girişini kontrol et
-        trackCourierMovement(courierLocation);
-        checkCourierStoreEntrance(courierLocation);
+    private static final class CourierTrackingState {
+        private final Map<String, Boolean> insideStores = new HashMap<>();
+        private final Map<String, Long> lastCountedEntryTimestamps = new HashMap<>();
+        private CourierLocation lastLocation;
+        private double totalDistanceMeters;
     }
 }

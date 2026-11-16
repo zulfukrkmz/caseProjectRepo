@@ -1,27 +1,31 @@
 package com.migros.caseProject.util;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.migros.caseProject.model.Store;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
-
-import java.io.File;
 import java.io.IOException;
 import java.util.List;
 
 @Component
 public class StoreLoader {
 
-    private static final String STORE_FILE_PATH = "src/main/resources/stores.json"; // stores.json dosyasının yolu
+    private final List<Store> stores;
 
-    public List<Store> loadStores() {
-        try {
-            // JSON dosyasını okuma işlemi
-            ObjectMapper objectMapper = new ObjectMapper();
-            // Store sınıfındaki listeyi döndürüyoruz
-            return objectMapper.readValue(new File(STORE_FILE_PATH), objectMapper.getTypeFactory().constructCollectionType(List.class, Store.class));
+    public StoreLoader(ObjectMapper objectMapper) {
+        try (var inputStream = new ClassPathResource("stores.json").getInputStream()) {
+            List<Store> loadedStores = objectMapper.readValue(inputStream, new TypeReference<List<Store>>() {});
+            if (loadedStores == null || loadedStores.isEmpty()) {
+                throw new IllegalStateException("stores.json must contain at least one store");
+            }
+            stores = List.copyOf(loadedStores);
         } catch (IOException e) {
-            e.printStackTrace();
-            return null; // Hata durumunda null döndürebiliriz, ancak bu durumda hata yönetimini daha detaylı yapmak iyi olacaktır
+            throw new IllegalStateException("Could not load stores.json from the application classpath", e);
         }
+    }
+
+    public List<Store> getStores() {
+        return stores;
     }
 }

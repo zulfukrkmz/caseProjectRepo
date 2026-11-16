@@ -25,4 +25,16 @@ public class Store {
     public Double getLng() {
         return lng;
     }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public void setLat(Double lat) {
+        this.lat = lat;
+    }
+
+    public void setLng(Double lng) {
+        this.lng = lng;
+    }
 }
