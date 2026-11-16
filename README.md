@@ -52,7 +52,7 @@ Postman'de yeni bir request açın, türünü **GET**, adresini `http://localhos
 | `lng` | Sayı | Zorunlu; -180 ile 180 arasında olmalı |
 | `timestamp` | Tamsayı | Zorunlu; milisaniye cinsinden Unix zamanı, sıfır veya daha büyük olmalı |
 
-`timestamp` değeri, aynı kurye için gönderilen son kabul edilmiş zamandan eski olamaz. Geçersiz JSON veya alanlar için **400 Bad Request**, eski zaman damgası için **409 Conflict** döner. Hata response'unda açıklamayı içeren `message` alanı bulunur.
+`timestamp` değeri, aynı kurye için gönderilen son kabul edilmiş zamandan daha yeni olmalıdır; eşit veya daha eski zaman damgaları kabul edilmez. Geçersiz JSON veya alanlar için **400 Bad Request**, eşit ya da eski zaman damgası için **409 Conflict** döner. Hata response'unda açıklamayı içeren `message` alanı bulunur.
 
 Geçersiz enlem örneği (`400 Bad Request`): `{"courierId":"kurye-123","lat":91,"lng":29,"timestamp":1800000002000}`.
 

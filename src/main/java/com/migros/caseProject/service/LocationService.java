@@ -48,7 +48,7 @@ public class LocationService {
 
         synchronized (state) {
             if (state.lastLocation != null
-                    && courierLocation.getTimestamp() < state.lastLocation.getTimestamp()) {
+                    && courierLocation.getTimestamp() <= state.lastLocation.getTimestamp()) {
                 log.warn("Rejected out-of-order location for courier {}", courierLocation.getCourierId());
                 throw new InvalidLocationTimestampException(courierLocation.getCourierId());
             }
