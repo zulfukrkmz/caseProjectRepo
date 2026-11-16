@@ -75,32 +75,197 @@ Windows PowerShell'de `.\mvnw.cmd test`, macOS veya Linux'ta `./mvnw test` komut
 - **Factory:** `CourierLocationFactory`, API request'indeki DTO'yu uygulama içinde kullanılan konum nesnesine dönüştürür.
 - **Strategy:** `DistanceCalculator` mesafe hesaplama yöntemini soyutlar. `HaversineDistanceCalculator` koordinatlar arasındaki mesafeyi metre cinsinden hesaplar.
 
-## Gönderdiğim örnek request'ler ve aldığım response'lar
+## Örnek test senaryoları
 
-Aşağıdaki request'leri uygulamayı çalıştırıp API'ye gönderdiğimde bu response'ları aldım. Her POST request'i HTTP 200 olarak döndü.
+Senaryoları uygulama çalışırken Postman veya başka bir HTTP istemcisiyle sırayla deneyin. Her konum isteği `POST http://localhost:8080/locations/track` adresine `Content-Type: application/json` başlığıyla gönderilir. Her kurye için timestamp kesin olarak artmalıdır; eşit veya daha eski timestamp `409 Conflict` döndürür. Aşağıdaki POST istekleri `200 OK` döndürmelidir. Varsayılan limit dakikada 60 istek olduğundan tüm örnekler aynı dakika içinde çalıştırılabilir.
 
-İlk konum — mağazanın koordinatları:
+### Kurye 1: kurye-ali
 
-`POST http://localhost:8080/locations/track`
+**1.** Kurye Ataşehir MMM Migros'ta başlar; ilk konumun mesafeleri sıfır, mağaza girişi kaydedilir.
 
-Request: `{"courierId":"kurye-readme","lat":40.9923307,"lng":29.1244229,"timestamp":1800000000000}`
+Request:
+```http
+POST http://localhost:8080/locations/track
+Content-Type: application/json
+```
+```json
+{"courierId":"kurye-ali","lat":40.9923307,"lng":29.1244229,"timestamp":1800000000000}
+```
+Response:
+```json
+{"courierId":"kurye-ali","segmentDistanceMeters":0.0,"totalDistanceMeters":0.0,"storeEntrances":[{"storeName":"Ataşehir MMM Migros","distanceMeters":0.0,"timestamp":1800000000000}]}
+```
 
-Response: `{"courierId":"kurye-readme","segmentDistanceMeters":0.0,"totalDistanceMeters":0.0,"storeEntrances":[{"storeName":"Ataşehir MMM Migros","distanceMeters":0.0,"timestamp":1800000000000}]}`
+**2.** Kurye yaklaşık 111 metre kuzeye çıkar; mağaza alanından çıkış yeni bir giriş sayılmaz.
 
-Kurye mağazadan yaklaşık 111 metre kuzeye gidiyor:
+Request:
+```http
+POST http://localhost:8080/locations/track
+Content-Type: application/json
+```
+```json
+{"courierId":"kurye-ali","lat":40.9933307,"lng":29.1244229,"timestamp":1800000001000}
+```
+Response:
+```json
+{"courierId":"kurye-ali","segmentDistanceMeters":111.19492664568354,"totalDistanceMeters":111.19492664568354,"storeEntrances":[]}
+```
 
-Request: `{"courierId":"kurye-readme","lat":40.9933307,"lng":29.1244229,"timestamp":1800000001000}`
+**3.** Kurye Novada MMM Migros'a gider; yeni segment toplama eklenir ve Novada girişi kaydedilir.
 
-Response: `{"courierId":"kurye-readme","segmentDistanceMeters":111.19492664568354,"totalDistanceMeters":111.19492664568354,"storeEntrances":[]}`
+Request:
+```http
+POST http://localhost:8080/locations/track
+Content-Type: application/json
+```
+```json
+{"courierId":"kurye-ali","lat":40.986106,"lng":29.1161293,"timestamp":1800000002000}
+```
+Response:
+```json
+{"courierId":"kurye-ali","segmentDistanceMeters":1062.9841874327753,"totalDistanceMeters":1174.179114078459,"storeEntrances":[{"storeName":"Novada MMM Migros","distanceMeters":0.0,"timestamp":1800000002000}]}
+```
 
-Kurye 60 saniye sonra mağazaya geri dönüyor:
+**4.** Kurye, mağazanın 100 metre içindeki alanında 60 saniye dolmadan tekrar konum bildirir; hâlâ mağaza içinde olduğu için yeni bir mağaza girişi sayılmaz.
 
-Request: `{"courierId":"kurye-readme","lat":40.9923307,"lng":29.1244229,"timestamp":1800000060000}`
+Request:
+```http
+POST http://localhost:8080/locations/track
+Content-Type: application/json
+```
+```json
+{"courierId":"kurye-ali","lat":40.986606,"lng":29.1161293,"timestamp":1800000003000}
+```
+Response:
+```json
+{"courierId":"kurye-ali","segmentDistanceMeters":55.59746332284177,"totalDistanceMeters":1229.7765774013008,"storeEntrances":[]}
+```
 
-Response: `{"courierId":"kurye-readme","segmentDistanceMeters":111.19492664568354,"totalDistanceMeters":222.38985329136707,"storeEntrances":[{"storeName":"Ataşehir MMM Migros","distanceMeters":0.0,"timestamp":1800000060000}]}`
+**5.** Kurye Ataşehir'e döner; ilk Ataşehir girişinden tam 60 saniye geçtiği için yeniden giriş sayılır.
 
-Aynı kurye için toplam mesafeyi sorguladığımda aldığım response:
+Request:
+```http
+POST http://localhost:8080/locations/track
+Content-Type: application/json
+```
+```json
+{"courierId":"kurye-ali","lat":40.9923307,"lng":29.1244229,"timestamp":1800000060000}
+```
+Response:
+```json
+{"courierId":"kurye-ali","segmentDistanceMeters":943.278024202827,"totalDistanceMeters":2173.054601604128,"storeEntrances":[{"storeName":"Ataşehir MMM Migros","distanceMeters":0.0,"timestamp":1800000060000}]}
+```
 
-`GET http://localhost:8080/locations/kurye-readme/total-distance`
+Kurye 1'in toplam mesafesi beşinci POST response'undaki değerle eşleşmelidir.
 
-Response: `{"courierId":"kurye-readme","totalDistanceMeters":222.38985329136707}`
+Request:
+```http
+GET http://localhost:8080/locations/kurye-ali/total-distance
+```
+Response:
+```json
+{"courierId":"kurye-ali","totalDistanceMeters":2173.054601604128}
+```
+
+### Kurye 2: kurye-ayse
+
+**1.** İkinci kurye Beylikdüzü 5M Migros'ta başlar; kurye-ali'nin geçmişi bu kurye için kullanılmaz.
+
+Request:
+```http
+POST http://localhost:8080/locations/track
+Content-Type: application/json
+```
+```json
+{"courierId":"kurye-ayse","lat":41.0066851,"lng":28.6552262,"timestamp":1800000100000}
+```
+Response:
+```json
+{"courierId":"kurye-ayse","segmentDistanceMeters":0.0,"totalDistanceMeters":0.0,"storeEntrances":[{"storeName":"Beylikdüzü 5M Migros","distanceMeters":0.0,"timestamp":1800000100000}]}
+```
+
+**2.** Kurye yaklaşık 111 metre güneye gider; mağaza alanından çıkar ve yeni giriş kaydedilmez.
+
+Request:
+```http
+POST http://localhost:8080/locations/track
+Content-Type: application/json
+```
+```json
+{"courierId":"kurye-ayse","lat":41.0056851,"lng":28.6552262,"timestamp":1800000101000}
+```
+Response:
+```json
+{"courierId":"kurye-ayse","segmentDistanceMeters":111.19492664426889,"totalDistanceMeters":111.19492664426889,"storeEntrances":[]}
+```
+
+**3.** Kurye aynı enlemde doğuya ilerler; konum mağaza yarıçapının dışında kalır.
+
+Request:
+```http
+POST http://localhost:8080/locations/track
+Content-Type: application/json
+```
+```json
+{"courierId":"kurye-ayse","lat":41.0056851,"lng":28.6562262,"timestamp":1800000102000}
+```
+Response:
+```json
+{"courierId":"kurye-ayse","segmentDistanceMeters":83.91263758393364,"totalDistanceMeters":195.10756422820253,"storeEntrances":[]}
+```
+
+**4.** Kurye Ortaköy MMM Migros'a gider; uzun segment toplama eklenir ve Ortaköy girişi kaydedilir.
+
+Request:
+```http
+POST http://localhost:8080/locations/track
+Content-Type: application/json
+```
+```json
+{"courierId":"kurye-ayse","lat":41.055783,"lng":29.0210292,"timestamp":1800000103000}
+```
+Response:
+```json
+{"courierId":"kurye-ayse","segmentDistanceMeters":31102.843912293658,"totalDistanceMeters":31297.95147652186,"storeEntrances":[{"storeName":"Ortaköy MMM Migros","distanceMeters":0.0,"timestamp":1800000103000}]}
+```
+
+**5.** Kurye Ortaköy'den yaklaşık 111 metre kuzeye çıkar; çıkış yeni bir giriş üretmez.
+
+Request:
+```http
+POST http://localhost:8080/locations/track
+Content-Type: application/json
+```
+```json
+{"courierId":"kurye-ayse","lat":41.056783,"lng":29.0210292,"timestamp":1800000104000}
+```
+Response:
+```json
+{"courierId":"kurye-ayse","segmentDistanceMeters":111.1949266449762,"totalDistanceMeters":31409.146403166837,"storeEntrances":[]}
+```
+
+**6.** Kurye ilk Ortaköy girişinden tam 60 saniye sonra geri döner; yeniden giriş kaydedilir.
+
+Request:
+```http
+POST http://localhost:8080/locations/track
+Content-Type: application/json
+```
+```json
+{"courierId":"kurye-ayse","lat":41.055783,"lng":29.0210292,"timestamp":1800000163000}
+```
+Response:
+```json
+{"courierId":"kurye-ayse","segmentDistanceMeters":111.1949266449762,"totalDistanceMeters":31520.341329811814,"storeEntrances":[{"storeName":"Ortaköy MMM Migros","distanceMeters":0.0,"timestamp":1800000163000}]}
+```
+
+Kurye 2'nin toplam mesafesi yalnızca kurye-ayse konumlarından oluşmalıdır.
+
+Request:
+```http
+GET http://localhost:8080/locations/kurye-ayse/total-distance
+```
+Response:
+```json
+{"courierId":"kurye-ayse","totalDistanceMeters":31520.341329811814}
+```

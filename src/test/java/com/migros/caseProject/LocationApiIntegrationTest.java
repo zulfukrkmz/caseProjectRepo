@@ -50,6 +50,42 @@ class LocationApiIntegrationTest {
     }
 
     @Test
+    void tracksIndependentJourneysForTwoCouriers() throws Exception {
+        String courierOne = "journey-ali-" + UUID.randomUUID();
+        assertLocation(courierOne, 40.9923307, 29.1244229, 1_800_000_000_000L,
+                0.0, 0.0, "Ataşehir MMM Migros");
+        assertLocation(courierOne, 40.9933307, 29.1244229, 1_800_000_001_000L,
+                111.19492664568354, 111.19492664568354, null);
+        assertLocation(courierOne, 40.986106, 29.1161293, 1_800_000_002_000L,
+                1062.9841874327753, 1174.179114078459, "Novada MMM Migros");
+        assertLocation(courierOne, 40.986606, 29.1161293, 1_800_000_003_000L,
+                55.59746332284177, 1229.7765774013008, null);
+        assertLocation(courierOne, 40.9923307, 29.1244229, 1_800_000_060_000L,
+                943.278024202827, 2173.054601604128, "Ataşehir MMM Migros");
+
+        String courierTwo = "journey-ayse-" + UUID.randomUUID();
+        assertLocation(courierTwo, 41.0066851, 28.6552262, 1_800_000_100_000L,
+                0.0, 0.0, "Beylikdüzü 5M Migros");
+        assertLocation(courierTwo, 41.0056851, 28.6552262, 1_800_000_101_000L,
+                111.19492664426889, 111.19492664426889, null);
+        assertLocation(courierTwo, 41.0056851, 28.6562262, 1_800_000_102_000L,
+                83.91263758393364, 195.10756422820253, null);
+        assertLocation(courierTwo, 41.055783, 29.0210292, 1_800_000_103_000L,
+                31102.843912293658, 31297.95147652186, "Ortaköy MMM Migros");
+        assertLocation(courierTwo, 41.056783, 29.0210292, 1_800_000_104_000L,
+                111.1949266449762, 31409.146403166837, null);
+        assertLocation(courierTwo, 41.055783, 29.0210292, 1_800_000_163_000L,
+                111.1949266449762, 31520.341329811814, "Ortaköy MMM Migros");
+
+        mockMvc.perform(get("/locations/{courierId}/total-distance", courierOne))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalDistanceMeters").value(2173.054601604128));
+        mockMvc.perform(get("/locations/{courierId}/total-distance", courierTwo))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalDistanceMeters").value(31520.341329811814));
+    }
+
+    @Test
     void postReturnsReadableValidationErrorForInvalidCoordinates() throws Exception {
         mockMvc.perform(post("/locations/track")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -173,6 +209,32 @@ class LocationApiIntegrationTest {
                             .content(request))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.message").isNotEmpty());
+        }
+    }
+
+    private void assertLocation(String courierId, double lat, double lng, long timestamp,
+                                double segmentDistance, double totalDistance, String storeEntrance)
+            throws Exception {
+        String request = """
+                {
+                  "courierId": "%s",
+                  "lat": %s,
+                  "lng": %s,
+                  "timestamp": %d
+                }
+                """.formatted(courierId, lat, lng, timestamp);
+
+        var result = mockMvc.perform(post("/locations/track")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.courierId").value(courierId))
+                .andExpect(jsonPath("$.segmentDistanceMeters").value(segmentDistance))
+                .andExpect(jsonPath("$.totalDistanceMeters").value(totalDistance))
+                .andExpect(jsonPath("$.storeEntrances.length()").value(storeEntrance == null ? 0 : 1));
+
+        if (storeEntrance != null) {
+            result.andExpect(jsonPath("$.storeEntrances[0].storeName").value(storeEntrance));
         }
     }
 }
