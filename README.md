@@ -60,9 +60,15 @@ Zaman damgası eski bir konum örneği (`409 Conflict`; önceki request'te `1800
 
 Mağaza yarıçapı `migros.radius-meters`, yeniden giriş bekleme süresi ise `migros.reentry-cooldown-millis` ayarlarıyla değiştirilebilir. Varsayılan değerler sırasıyla 100 metre ve 60.000 milisaniyedir.
 
+## İstek limiti
+
+Her iki `/locations` endpoint'i istemci IP'si başına token bucket ile sınırlandırılır. Varsayılan bucket kapasitesi 60 istek, yenileme hızı dakikada 60 istektir; böylece kısa süreli burst'lere izin verilir. Limit aşılırsa API **429 Too Many Requests** ve yeniden denemeden önce beklenmesi gereken saniyeyi belirten `Retry-After` başlığı döndürür.
+
+Limit `rate-limit.capacity`, `rate-limit.refill-tokens` ve `rate-limit.refill-interval-millis` ayarlarıyla değiştirilebilir. Sayaçlar uygulama belleğinde tutulduğu için limit tek uygulama instance'ı için geçerlidir; birden fazla instance kullanıldığında her instance'ın sayacı ayrıdır. İstemci IP'si varsayılan olarak doğrudan bağlantı adresinden alınır; güvenilir proxy yapılandırılmadan `X-Forwarded-For` kullanılmaz.
+
 ## Testleri çalıştırma
 
-Windows PowerShell'de `.\mvnw.cmd test`, macOS veya Linux'ta `./mvnw test` komutunu çalıştırın. Testler mesafe hesabını, mağaza giriş ve yeniden giriş kurallarını, toplam mesafeyi, zaman damgalarını ve API response'larını kapsar.
+Windows PowerShell'de `.\mvnw.cmd test`, macOS veya Linux'ta `./mvnw test` komutunu çalıştırın. Testler mesafe hesabını, mağaza giriş ve yeniden giriş kurallarını, toplam mesafeyi, zaman damgalarını, API response'larını ve istek limitini kapsar.
 
 ## Kullanılan tasarım kalıpları
 
