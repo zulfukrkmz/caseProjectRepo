@@ -4,7 +4,7 @@ Bu uygulama kurye konumlarını alır, katedilen mesafeyi hesaplar ve Migros ma�
 
 Uygulama `http://localhost:8080` adresinde çalışır. Mağaza konumları uygulama açılırken `src/main/resources/stores.json` dosyasından okunur.
 
-Uygulama geliştirilken spring frameworkten yararlanılarak rate limitter koyulmuştur.
+Uygulama geliştirilken spring frameworkten yararlanılarak rate limitter koyulmuştur. Dış servis çağırılmadığından bir circuit breaker koyulmamıştır. Db olarak spring boot ile h2 in memory db kullanılmıştır. Uygulamanın kapatılıp açılmasıyla veriler silineceği bilinmelidir. Bu projenin gerçeklenmesinde gerçek bir db kullanmak gerekliliği bilinerek yerelde sizlerin testi kolay olsun diye böyle bir yöntem seçildi. Aynı şekilde cache mekanizması için de Redis yerine in memory cache kullanılmıştır. Bu uygulamanın production seviyesinde devreye alınması için db, Redis ve authentication kodlarını eklemem gerekirdi. Test ve geliştirme eforunu azaltmak için bu şekilde bir yol izlenmiştir. Bunlar için postgre, Redis ve OAuth gibi teknolojiler kullanılabilir.
 
 ### Konum durumu ve eşzamanlılık
 
