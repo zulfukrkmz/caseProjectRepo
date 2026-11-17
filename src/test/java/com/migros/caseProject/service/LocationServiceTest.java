@@ -3,29 +3,57 @@ package com.migros.caseProject.service;
 import com.migros.caseProject.model.Store;
 import com.migros.caseProject.model.data.LocationDTO;
 import com.migros.caseProject.model.data.LocationTrackingResponse;
+import com.migros.caseProject.repository.CourierTrackingStateRepository;
+import com.migros.caseProject.util.DistanceCalculator;
 import com.migros.caseProject.util.HaversineDistanceCalculator;
 import com.migros.caseProject.util.StoreLoader;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.mock;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.Mockito.when;
 
+@SpringBootTest
 class LocationServiceTest {
 
     private static final Store STORE = new Store("Test Migros", 0.0, 0.0);
     private static final double ONE_DEGREE_LONGITUDE_METERS = 111_194.93;
+
+    @Autowired
     private LocationService locationService;
+
+    @Autowired
+    private CourierTrackingStateRepository stateRepository;
+
+    @MockitoBean
+    private StoreLoader storeLoader;
+
+    @MockitoBean
+    private DistanceCalculator distanceCalculator;
 
     @BeforeEach
     void setUp() {
-        StoreLoader storeLoader = mock(StoreLoader.class);
+        stateRepository.deleteAll();
         when(storeLoader.getStores()).thenReturn(List.of(STORE));
-        locationService = new LocationService(storeLoader, new HaversineDistanceCalculator(), 100, 60_000);
+        HaversineDistanceCalculator haversine = new HaversineDistanceCalculator();
+        when(distanceCalculator.calculateDistanceMeters(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+                .thenAnswer(invocation -> haversine.calculateDistanceMeters(
+                        invocation.getArgument(0), invocation.getArgument(1),
+                        invocation.getArgument(2), invocation.getArgument(3)));
     }
 
     @Test
@@ -43,11 +71,9 @@ class LocationServiceTest {
 
     @Test
     void includesCourierExactlyOnTheConfiguredStoreRadius() {
-        StoreLoader storeLoader = mock(StoreLoader.class);
-        when(storeLoader.getStores()).thenReturn(List.of(STORE));
-        LocationService service = new LocationService(storeLoader, (lat1, lng1, lat2, lng2) -> 100, 100, 60_000);
+        when(distanceCalculator.calculateDistanceMeters(0, 0, 0, 0)).thenReturn(100.0);
 
-        LocationTrackingResponse response = service.processLocation(location("courier-boundary", 0, 0, 1_000));
+        LocationTrackingResponse response = locationService.processLocation(location("courier-boundary", 0, 0, 1_000));
 
         assertEquals(1, response.storeEntrances().size());
         assertEquals(100, response.storeEntrances().get(0).distanceMeters());
@@ -134,17 +160,56 @@ class LocationServiceTest {
 
     @Test
     void countsEntriesForEveryStoreWhenOneLocationIsInsideMultipleStores() {
-        StoreLoader storeLoader = mock(StoreLoader.class);
         when(storeLoader.getStores()).thenReturn(List.of(
                 new Store("Store A", 0.0, 0.0),
                 new Store("Store B", 0.0, 0.0)));
-        LocationService service = new LocationService(storeLoader, new HaversineDistanceCalculator(), 100, 60_000);
 
-        LocationTrackingResponse response = service.processLocation(location("courier-multi-store", 0, 0, 1_000));
+        LocationTrackingResponse response = locationService.processLocation(location("courier-multi-store", 0, 0, 1_000));
 
         assertEquals(2, response.storeEntrances().size());
         assertEquals(List.of("Store A", "Store B"),
                 response.storeEntrances().stream().map(entrance -> entrance.storeName()).toList());
+    }
+
+    @Test
+    void acceptsOnlyOneOfConcurrentLocationsWithTheSameCourierTimestamp() throws Exception {
+        int requestCount = 12;
+        ExecutorService executor = Executors.newFixedThreadPool(requestCount);
+        CountDownLatch ready = new CountDownLatch(requestCount);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<Boolean>> results = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < requestCount; i++) {
+                double latitude = latitudeForMeters(i);
+                results.add(executor.submit(() -> {
+                    ready.countDown();
+                    if (!start.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Timed out waiting to start concurrent requests");
+                    }
+                    try {
+                        locationService.processLocation(location("courier-concurrent", latitude, 0, 1_000));
+                        return true;
+                    } catch (InvalidLocationTimestampException exception) {
+                        return false;
+                    }
+                }));
+            }
+
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+
+            int acceptedCount = 0;
+            for (Future<Boolean> result : results) {
+                if (result.get(10, TimeUnit.SECONDS)) {
+                    acceptedCount++;
+                }
+            }
+            assertEquals(1, acceptedCount);
+            assertEquals(0, locationService.getTotalTravelDistance("courier-concurrent"));
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     private static LocationDTO location(String courierId, double lat, double lng, long timestamp) {

@@ -6,6 +6,12 @@ Uygulama `http://localhost:8080` adresinde çalışır. Mağaza konumları uygul
 
 Uygulama geliştirilken spring frameworkten yararlanılarak rate limitter koyulmuştur.
 
+### Konum durumu ve eşzamanlılık
+
+Kurye başına son konum, toplam mesafe ve mağaza giriş durumu Spring Data JPA ile H2 in-memory veritabanında saklanır. Aynı kurye için konum güncellemesi transaction içinde veritabanı satır kilidiyle işlenir; paralel isteklerden biri tamamlanmadan sonraki istek önceki güncel durumu görür. İlk kurye kaydının eşzamanlı oluşturulması da kilitlenerek korunur. Böylece aynı uygulama içindeki farklı thread'lerden gelen isteklerde mesafe ve mağaza durumu tutarlı kalır.
+
+H2 veritabanı uygulama belleğinde yaşar; uygulama kapandığında takip verileri silinir. Bu yapı aynı JVM içindeki thread'leri destekler, fakat ayrı uygulama süreçleri arasında ortak veritabanı sağlamaz. Birden fazla JVM instance'ı için paylaşımlı bir veritabanı gerekir.
+
 ### Konum gönderme
 
 Request türü: **POST**, adresi `http://localhost:8080/locations/track`. `Content-Type: application/json`
