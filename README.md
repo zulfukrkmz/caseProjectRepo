@@ -1,39 +1,31 @@
 # Kurye Konum Takip API'si
 
-Bu Spring Boot uygulaması kurye konumlarını alır, katedilen mesafeyi hesaplar ve Migros mağazalarının çevresine yapılan girişleri takip eder. Request'leri Postman'den gönderip sonuçları response gövdesinde görebilirsiniz.
-
-## Gereksinimler
-
-- Java 21
-- Maven (projede Maven Wrapper bulunduğu için ayrıca Maven kurmanız gerekmez)
-
-## Uygulamayı başlatma
-
-Windows PowerShell'de `.\mvnw.cmd spring-boot:run`, macOS veya Linux'ta `./mvnw spring-boot:run` komutunu çalıştırın.
+Bu uygulama kurye konumlarını alır, katedilen mesafeyi hesaplar ve Migros mağazalarının çevresine yapılan girişleri hesaplar.
 
 Uygulama `http://localhost:8080` adresinde çalışır. Mağaza konumları uygulama açılırken `src/main/resources/stores.json` dosyasından okunur.
 
-## Postman ile request gönderme
+Uygulama geliştirilken spring frameworkten yararlanılarak rate limitter koyulmuştur.
 
 ### Konum gönderme
 
-Postman'de yeni bir request açın. Request türünü **POST**, adresi `http://localhost:8080/locations/track` olarak ayarlayın. Request gövdesine aşağıdaki JSON'u ekleyin ve `Content-Type: application/json` başlığıyla gönderin:
+Request türü: **POST**, adresi `http://localhost:8080/locations/track`. `Content-Type: application/json`
 
+Örnek konum gönderme Json body'si:
 `{"courierId":"kurye-123","lat":40.9923307,"lng":29.1244229,"timestamp":1800000000000}`
 
 Bu koordinatlar Ataşehir MMM Migros'u gösterir. İlk konumun response'unda segment ve toplam mesafe sıfır olur; `storeEntrances` alanında girilen mağaza görünür.
 
-Response'ta `segmentDistanceMeters`, bu request'le bir önceki konum arasında katedilen mesafeyi; `totalDistanceMeters` ise kurye için birikmiş toplam mesafeyi gösterir. Mesafeler metre cinsindendir.
+Response'ta `segmentDistanceMeters` bu request'le bir önceki konum arasında katedilen mesafeyi; `totalDistanceMeters` ise kurye için birikmiş toplam mesafeyi gösterir. Mesafeler metre cinsindendir.
 
-### Mesafe ve mağazadan çıkış/giriş durumunu deneme
+### Mesafe hesaplaması ve mağazadan çıkış/giriş durumunu denemeleri
 
-Aynı kurye için yine `POST http://localhost:8080/locations/track` adresine, zaman damgası ilerletilmiş yeni bir konum request'i gönderin. Aşağıdaki örnekte kurye mağazadan yaklaşık 111 metre kuzeye gider:
+Aynı kurye için yine `POST http://localhost:8080/locations/track` url'ine yeni bir konum request'i gönderelim. Farklı bir timestamp değeri yani zamanda olması gerekli, aynı zamanda 111 metre ilerleyecek şekilde aşağıdaki gibi bir örnek olabilir.
 
 `{"courierId":"kurye-123","lat":40.9933307,"lng":29.1244229,"timestamp":1800000001000}`
 
 Response'ta yaklaşık `111.19` metre segment mesafesi görünür; kurye mağazanın 100 metrelik alanının dışına çıkmıştır.
 
-Kurye en son sayılan girişten en az 60 saniye sonra mağazaya yeniden girerse yeni giriş sayılır. Bunu denemek için aynı adrese aşağıdaki konum request'ini gönderin:
+Kurye en son sayılan girişten en az 60 saniye sonra mağazaya yeniden girerse yeni giriş sayılır. Bunu denemek için aynı adrese aşağıdaki Json body ile yeni bir konum request'ini gönderebiliriz(yine farklı bir timestamp ile yollamalıyız.):
 
 `{"courierId":"kurye-123","lat":40.9923307,"lng":29.1244229,"timestamp":1800000060000}`
 
@@ -41,22 +33,15 @@ Bu request'in `storeEntrances` alanında Ataşehir MMM Migros görünür. Mağaz
 
 ### Toplam mesafeyi sorgulama
 
-Postman'de yeni bir request açın, türünü **GET**, adresini `http://localhost:8080/locations/kurye-123/total-distance` olarak ayarlayıp gönderin. Örnek response: `{"courierId":"kurye-123","totalDistanceMeters":222.39}`. Toplam, gönderdiğiniz konumlara göre değişir. Henüz konumu gönderilmemiş bir kurye için toplam mesafe sıfır döner.
+Request türü: **GET**, url'i `http://localhost:8080/locations/kurye-123/total-distance` olarak ayarlayıp gönderelim. Örnek response: `{"courierId":"kurye-123","totalDistanceMeters":222.39}`. Toplam yolladığımız konum requestlerine göre değişir. Hiç yollanmadıysa 0 döner.
 
-## Request alanları ve hata response'ları
-
-| Alan | Tür | Koşul |
-|---|---|---|
-| `courierId` | Metin | Zorunlu, boş olamaz ve en fazla 100 karakter olabilir |
-| `lat` | Sayı | Zorunlu; -90 ile 90 arasında olmalı |
-| `lng` | Sayı | Zorunlu; -180 ile 180 arasında olmalı |
-| `timestamp` | Tamsayı | Zorunlu; milisaniye cinsinden Unix zamanı, sıfır veya daha büyük olmalı |
+## Hata response'ları
 
 `timestamp` değeri, aynı kurye için gönderilen son kabul edilmiş zamandan daha yeni olmalıdır; eşit veya daha eski zaman damgaları kabul edilmez. Geçersiz JSON veya alanlar için **400 Bad Request**, eşit ya da eski zaman damgası için **409 Conflict** döner. Hata response'unda açıklamayı içeren `message` alanı bulunur.
 
 Geçersiz enlem örneği (`400 Bad Request`): `{"courierId":"kurye-123","lat":91,"lng":29,"timestamp":1800000002000}`.
 
-Zaman damgası eski bir konum örneği (`409 Conflict`; önceki request'te `1800000001000` kullanılmış olmalı): `{"courierId":"kurye-123","lat":40.9933307,"lng":29.1244229,"timestamp":1800000000000}`.
+Zaman değeri aynı veya eski bir konum örneği (`409 Conflict`; önceki request'te `1800000001000` kullanılmış olmalı): `{"courierId":"kurye-123","lat":40.9933307,"lng":29.1244229,"timestamp":1800000000000}`.
 
 Mağaza yarıçapı `migros.radius-meters`, yeniden giriş bekleme süresi ise `migros.reentry-cooldown-millis` ayarlarıyla değiştirilebilir. Varsayılan değerler sırasıyla 100 metre ve 60.000 milisaniyedir.
 
@@ -68,7 +53,7 @@ Limit `rate-limit.capacity`, `rate-limit.refill-tokens` ve `rate-limit.refill-in
 
 ## Testleri çalıştırma
 
-Windows PowerShell'de `.\mvnw.cmd test`, macOS veya Linux'ta `./mvnw test` komutunu çalıştırın. Testler mesafe hesabını, mağaza giriş ve yeniden giriş kurallarını, toplam mesafeyi, zaman damgalarını, API response'larını ve istek limitini kapsar.
+Maven test kullanılarak çalıştırılabilir. Testler `src/test/java` dizininde bulunur. 
 
 ## Kullanılan tasarım kalıpları
 
